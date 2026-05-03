@@ -1,9 +1,10 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import * as Font from 'expo-font';
 import { Ionicons } from '@expo/vector-icons';
 import AppNavigator from './src/navigation/AppNavigator';
+import { registerForPushNotificationsAsync, setupNotificationListeners } from './src/services/notificationService';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
 
@@ -48,10 +49,19 @@ export default function App() {
   const [fontsLoaded] = Font.useFonts({
     ...Ionicons.font,
   });
+  const navigationRef = useRef(null);
 
-  // Ping backend on app mount
+  // Ping backend on app mount and setup notifications
   useEffect(() => {
     checkBackendConnection();
+
+    // Setup push notifications
+    registerForPushNotificationsAsync().then(token => console.log('Push token:', token));
+    const cleanupNotifications = setupNotificationListeners();
+
+    return () => {
+      if (cleanupNotifications) cleanupNotifications();
+    };
   }, []);
 
   if (!fontsLoaded) {

@@ -142,6 +142,8 @@ function BookingRequestCard({ booking, onAccept, onDecline, onComplete }) {
     );
 }
 
+import { connectSocket, disconnectSocket } from '../services/socketService';
+
 export default function MaidDashboardScreen({ navigation }) {
     const [profile, setProfile] = useState(null);
     const [bookings, setBookings] = useState([]);
@@ -187,10 +189,47 @@ export default function MaidDashboardScreen({ navigation }) {
 
     useFocusEffect(useCallback(() => { loadData(); }, []));
 
-    // Listen to local store changes
+    // Real-time Sockets and Polling Fallback
     useEffect(() => {
+        let pollInterval;
+        let activeSocket;
+
+        const setupRealtime = async () => {
+            activeSocket = await connectSocket();
+            if (activeSocket) {
+                console.log('🎧 Listening for real-time booking events...');
+                
+                // When a new booking request comes in
+                activeSocket.on('new_booking', (booking) => {
+                    console.log('🔔 REAL-TIME: New booking received!', booking.id);
+                    loadData(); // Refresh the list
+                });
+
+                // When a booking status is updated or cancelled
+                activeSocket.on('booking_updated', () => loadData());
+                activeSocket.on('booking_cancelled', () => loadData());
+            }
+
+            // Fallback Polling: Every 10 seconds, silently check for updates
+            // This ensures reliability if the socket disconnects temporarily
+            pollInterval = setInterval(() => {
+                // Only poll if not already refreshing manually
+                if (!refreshing) {
+                    loadData();
+                }
+            }, 10000);
+        };
+
+        setupRealtime();
+
+        // Listen to local store changes
         const unsub = subscribe(() => loadData());
-        return unsub;
+        
+        return () => {
+            unsub();
+            if (pollInterval) clearInterval(pollInterval);
+            disconnectSocket();
+        };
     }, []);
 
     const onRefresh = () => { setRefreshing(true); loadData(); };

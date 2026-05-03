@@ -1,10 +1,12 @@
 import { auth } from '../config/firebaseConfig';
 
 // ============================================================
-// 🔧  Base URL — configured in .env file
-//     Change API_BASE_URL in .env for your environment
+// 🔧  Base URL — dynamically switch based on environment
 // ============================================================
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+export const API_BASE_URL = __DEV__ 
+  ? (process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.31.217:8080/api')
+  : (process.env.EXPO_PUBLIC_PROD_API_URL || 'https://api.serveease.com/api');
+
 
 /**
  * Get the Firebase ID token for the currently signed-in user.
