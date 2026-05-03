@@ -297,6 +297,13 @@ export const getPendingRequests = async () => {
     return apiRequest('/bookings/requests');
 };
 
+/**
+ * Get active bookings with customer locations for map display (maid only).
+ */
+export const getBookingsForMap = async () => {
+    return apiRequest('/bookings/map');
+};
+
 // ==================== REVIEWS ====================
 
 /**

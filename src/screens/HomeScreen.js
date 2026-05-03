@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, FlatList, StyleSheet, ActivityIndicator, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, FlatList, StyleSheet, ActivityIndicator, Text, TouchableOpacity, ScrollView, Dimensions, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import MapView, { Marker, Callout } from 'react-native-maps';
 import { getNearbyMaids, searchMaids, updateLocation } from '../services/apiService';
 
 import Header from '../components/Header';
@@ -122,6 +123,9 @@ export default function HomeScreen({ navigation }) {
     const [loading, setLoading] = useState(true);
     const [maids, setMaids] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
+    const [showMap, setShowMap] = useState(false);
+    const [selectedMaidId, setSelectedMaidId] = useState(null);
+    const mapRef = useRef(null);
 
     useEffect(() => {
         (async () => {
@@ -172,6 +176,15 @@ export default function HomeScreen({ navigation }) {
         })();
     }, []);
 
+    // Auto-refresh maid locations every 30 seconds
+    useEffect(() => {
+        if (!location) return;
+        const interval = setInterval(() => {
+            fetchNearbyMaids(location.latitude, location.longitude);
+        }, 30000);
+        return () => clearInterval(interval);
+    }, [location]);
+
     const fetchNearbyMaids = async (lat, lng) => {
         try {
             const response = await getNearbyMaids(lat, lng, 5);
@@ -220,6 +233,8 @@ export default function HomeScreen({ navigation }) {
         );
     }
 
+    const maidsWithCoords = maids.filter(m => m.latitude != null && m.longitude != null);
+
     return (
         <View style={styles.container}>
             {/* Header */}
@@ -230,27 +245,109 @@ export default function HomeScreen({ navigation }) {
                 <SearchBar onSearch={handleSearch} />
             </View>
 
+            {/* Map/List Toggle */}
+            <View style={styles.toggleRow}>
+                <TouchableOpacity
+                    style={[styles.toggleBtn, !showMap && styles.toggleBtnActive]}
+                    onPress={() => setShowMap(false)}
+                >
+                    <Ionicons name="list" size={16} color={!showMap ? '#fff' : '#6b7280'} />
+                    <Text style={[styles.toggleText, !showMap && styles.toggleTextActive]}>List</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.toggleBtn, showMap && styles.toggleBtnActive]}
+                    onPress={() => setShowMap(true)}
+                >
+                    <Ionicons name="map" size={16} color={showMap ? '#fff' : '#6b7280'} />
+                    <Text style={[styles.toggleText, showMap && styles.toggleTextActive]}>Map</Text>
+                </TouchableOpacity>
+            </View>
+
+            {/* Map View */}
+            {showMap && location && (
+                <View style={styles.mapContainer}>
+                    <MapView
+                        ref={mapRef}
+                        style={styles.map}
+                        initialRegion={{
+                            latitude: location.latitude,
+                            longitude: location.longitude,
+                            latitudeDelta: 0.05,
+                            longitudeDelta: 0.05,
+                        }}
+                        showsUserLocation={true}
+                        showsMyLocationButton={true}
+                        showsCompass={true}
+                    >
+                        {maidsWithCoords.map((maid) => (
+                            <Marker
+                                key={maid.id}
+                                coordinate={{
+                                    latitude: maid.latitude,
+                                    longitude: maid.longitude,
+                                }}
+                                onPress={() => setSelectedMaidId(maid.id)}
+                            >
+                                <View style={[
+                                    styles.mapMarker,
+                                    selectedMaidId === maid.id && styles.mapMarkerSelected,
+                                    { borderColor: maid.color }
+                                ]}>
+                                    <Ionicons
+                                        name="person"
+                                        size={16}
+                                        color={selectedMaidId === maid.id ? '#fff' : maid.color}
+                                    />
+                                </View>
+                                <Callout tooltip onPress={() => handleMaidPress(maid)}>
+                                    <View style={styles.calloutBox}>
+                                        <Text style={styles.calloutName}>{maid.name}</Text>
+                                        <View style={styles.calloutRow}>
+                                            <Ionicons name="star" size={12} color="#f59e0b" />
+                                            <Text style={styles.calloutRating}>{maid.rating}</Text>
+                                            <Text style={styles.calloutDivider}>·</Text>
+                                            <Text style={styles.calloutRate}>₹{maid.hourlyRate}/hr</Text>
+                                        </View>
+                                        <Text style={styles.calloutDistance}>{maid.distance} away</Text>
+                                        <View style={styles.calloutAction}>
+                                            <Text style={styles.calloutActionText}>Tap to Book →</Text>
+                                        </View>
+                                    </View>
+                                </Callout>
+                            </Marker>
+                        ))}
+                    </MapView>
+                    {maidsWithCoords.length === 0 && (
+                        <View style={styles.mapEmpty}>
+                            <Text style={styles.mapEmptyText}>No maids with location data nearby</Text>
+                        </View>
+                    )}
+                </View>
+            )}
+
             {/* Maid List */}
-            <FlatList
-                data={maids}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                renderItem={({ item }) => (
-                    <MaidListCard maid={item} onPress={() => handleMaidPress(item)} />
-                )}
-                ListHeaderComponent={
-                    <Text style={styles.sectionTitle}>
-                        {maids.length} {maids.length === 1 ? 'Maid' : 'Maids'} Available Nearby
-                    </Text>
-                }
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Ionicons name="search-outline" size={48} color="#d1d5db" />
-                        <Text style={styles.emptyText}>No maids found nearby</Text>
-                    </View>
-                }
-            />
+            {!showMap && (
+                <FlatList
+                    data={maids}
+                    keyExtractor={(item) => item.id}
+                    contentContainerStyle={styles.listContent}
+                    showsVerticalScrollIndicator={false}
+                    renderItem={({ item }) => (
+                        <MaidListCard maid={item} onPress={() => handleMaidPress(item)} />
+                    )}
+                    ListHeaderComponent={
+                        <Text style={styles.sectionTitle}>
+                            {maids.length} {maids.length === 1 ? 'Maid' : 'Maids'} Available Nearby
+                        </Text>
+                    }
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <Ionicons name="search-outline" size={48} color="#d1d5db" />
+                            <Text style={styles.emptyText}>No maids found nearby</Text>
+                        </View>
+                    }
+                />
+            )}
         </View>
     );
 }
@@ -404,5 +501,130 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#9ca3af',
         marginTop: 8,
+    },
+
+    // ── Map Toggle ──
+    toggleRow: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        gap: 8,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#f3f4f6',
+    },
+    toggleBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#f3f4f6',
+    },
+    toggleBtnActive: {
+        backgroundColor: '#3b82f6',
+    },
+    toggleText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#6b7280',
+    },
+    toggleTextActive: {
+        color: '#fff',
+    },
+
+    // ── Map ──
+    mapContainer: {
+        flex: 1,
+        position: 'relative',
+    },
+    map: {
+        flex: 1,
+    },
+    mapMarker: {
+        backgroundColor: '#eff6ff',
+        borderRadius: 20,
+        padding: 8,
+        borderWidth: 2,
+        borderColor: '#3b82f6',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+    },
+    mapMarkerSelected: {
+        backgroundColor: '#3b82f6',
+        transform: [{ scale: 1.2 }],
+    },
+    calloutBox: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 12,
+        minWidth: 150,
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+    },
+    calloutName: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#1f2937',
+        marginBottom: 4,
+    },
+    calloutRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginBottom: 4,
+    },
+    calloutRating: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#374151',
+    },
+    calloutDivider: {
+        fontSize: 13,
+        color: '#9ca3af',
+    },
+    calloutRate: {
+        fontSize: 13,
+        color: '#3b82f6',
+        fontWeight: '600',
+    },
+    calloutDistance: {
+        fontSize: 12,
+        color: '#6b7280',
+        marginBottom: 6,
+    },
+    calloutAction: {
+        backgroundColor: '#eff6ff',
+        borderRadius: 8,
+        paddingVertical: 4,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+    },
+    calloutActionText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#3b82f6',
+    },
+    mapEmpty: {
+        position: 'absolute',
+        bottom: 20,
+        left: 20,
+        right: 20,
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderRadius: 12,
+        padding: 12,
+        alignItems: 'center',
+    },
+    mapEmptyText: {
+        fontSize: 13,
+        color: '#6b7280',
+        fontWeight: '500',
     },
 });

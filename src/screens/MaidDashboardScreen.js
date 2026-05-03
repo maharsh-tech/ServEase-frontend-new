@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
     View,
     Text,
@@ -8,11 +8,14 @@ import {
     ScrollView,
     Alert,
     RefreshControl,
+    Linking,
+    Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
+import MapView, { Marker, Callout } from 'react-native-maps';
 import {
     getCurrentUser,
     getMyBookings,
@@ -155,6 +158,10 @@ export default function MaidDashboardScreen({ navigation }) {
     const [bookings, setBookings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [showMap, setShowMap] = useState(false);
+    const [mapBookings, setMapBookings] = useState([]);
+    const [maidLocation, setMaidLocation] = useState(null);
+    const mapRef = useRef(null);
 
     const loadData = async () => {
         try {
@@ -182,6 +189,27 @@ export default function MaidDashboardScreen({ navigation }) {
             setRefreshing(false);
         }
     };
+
+    // Derive map bookings from loaded bookings (reacts to bookings changes)
+    useEffect(() => {
+        const activeStatuses = ['PENDING', 'CONFIRMED', 'IN_PROGRESS'];
+        setMapBookings(bookings.filter(b => activeStatuses.includes(b.status)));
+    }, [bookings]);
+
+    // Get maid's own location for map centering
+    useEffect(() => {
+        (async () => {
+            try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status === 'granted') {
+                    const loc = await Location.getCurrentPositionAsync({});
+                    setMaidLocation(loc.coords);
+                }
+            } catch (e) {
+                console.log('Could not get maid location for map:', e.message);
+            }
+        })();
+    }, []);
 
     useFocusEffect(useCallback(() => { loadData(); }, []));
 
@@ -385,6 +413,27 @@ export default function MaidDashboardScreen({ navigation }) {
     const activeBookings = bookings.filter(b => b.status === 'CONFIRMED' || b.status === 'IN_PROGRESS');
     const pastBookings = bookings.filter(b => b.status === 'COMPLETED' || b.status === 'CANCELLED');
 
+    // Map bookings with valid customer coordinates
+    const mapBookingsWithCoords = mapBookings.filter(
+        b => b.customerLatitude != null && b.customerLongitude != null
+    );
+
+    const MAP_STATUS_COLORS = {
+        PENDING: '#f59e0b',
+        CONFIRMED: '#3b82f6',
+        IN_PROGRESS: '#ec4899',
+    };
+
+    const openDirections = (lat, lng) => {
+        const scheme = Platform.OS === 'ios' ? 'maps:' : 'geo:';
+        const url = Platform.OS === 'ios'
+            ? `maps:?daddr=${lat},${lng}`
+            : `geo:0,0?q=${lat},${lng}`;
+        Linking.openURL(url).catch(() => {
+            Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+        });
+    };
+
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
@@ -419,6 +468,89 @@ export default function MaidDashboardScreen({ navigation }) {
                 <StatCard icon="time-outline" label="Pending" value={pendingCount} color="#f59e0b" />
                 <StatCard icon="cash" label="Earned" value={`₹${totalEarnings}`} color="#7c3aed" />
             </View>
+
+            {/* Map/List Toggle */}
+            <View style={styles.mapToggleRow}>
+                <TouchableOpacity
+                    style={[styles.mapToggleBtn, !showMap && styles.mapToggleBtnActive]}
+                    onPress={() => setShowMap(false)}
+                >
+                    <Ionicons name="list" size={15} color={!showMap ? '#fff' : '#6b7280'} />
+                    <Text style={[styles.mapToggleText, !showMap && styles.mapToggleTextActive]}>Bookings</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.mapToggleBtn, showMap && styles.mapToggleBtnActive]}
+                    onPress={() => setShowMap(true)}
+                >
+                    <Ionicons name="map" size={15} color={showMap ? '#fff' : '#6b7280'} />
+                    <Text style={[styles.mapToggleText, showMap && styles.mapToggleTextActive]}>Map View</Text>
+                </TouchableOpacity>
+            </View>
+
+            {/* Map View */}
+            {showMap && maidLocation && (
+                <View style={styles.maidMapContainer}>
+                    <MapView
+                        ref={mapRef}
+                        style={styles.maidMap}
+                        initialRegion={{
+                            latitude: maidLocation.latitude,
+                            longitude: maidLocation.longitude,
+                            latitudeDelta: 0.08,
+                            longitudeDelta: 0.08,
+                        }}
+                        showsUserLocation={true}
+                        showsMyLocationButton={true}
+                    >
+                        {mapBookingsWithCoords.map((b) => {
+                            const markerColor = MAP_STATUS_COLORS[b.status] || '#6b7280';
+                            return (
+                                <Marker
+                                    key={String(b.id)}
+                                    coordinate={{
+                                        latitude: b.customerLatitude,
+                                        longitude: b.customerLongitude,
+                                    }}
+                                >
+                                    <View style={[styles.custMarker, { borderColor: markerColor, backgroundColor: markerColor + '20' }]}>
+                                        <Ionicons name="person" size={14} color={markerColor} />
+                                    </View>
+                                    <Callout tooltip>
+                                        <View style={styles.custCallout}>
+                                            <Text style={styles.custCalloutName}>{b.customerName || 'Customer'}</Text>
+                                            <Text style={styles.custCalloutService}>{b.serviceType || 'Service'}</Text>
+                                            <View style={[styles.custCalloutBadge, { backgroundColor: markerColor + '20' }]}>
+                                                <Text style={[styles.custCalloutStatus, { color: markerColor }]}>{b.status}</Text>
+                                            </View>
+                                            {b.scheduledAt && (
+                                                <Text style={styles.custCalloutTime}>
+                                                    {new Date(b.scheduledAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                                                    {' '}
+                                                    {new Date(b.scheduledAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                                </Text>
+                                            )}
+                                            {(b.status === 'CONFIRMED' || b.status === 'IN_PROGRESS') && (
+                                                <TouchableOpacity
+                                                    style={styles.custCalloutNav}
+                                                    onPress={() => openDirections(b.customerLatitude, b.customerLongitude)}
+                                                >
+                                                    <Ionicons name="navigate" size={12} color="#fff" />
+                                                    <Text style={styles.custCalloutNavText}>Navigate</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    </Callout>
+                                </Marker>
+                            );
+                        })}
+                    </MapView>
+                    {mapBookingsWithCoords.length === 0 && (
+                        <View style={styles.maidMapEmpty}>
+                            <Text style={styles.maidMapEmptyText}>No bookings with customer locations</Text>
+                        </View>
+                    )}
+                </View>
+            )}
 
             {/* New Requests */}
             <View style={styles.section}>
@@ -565,4 +697,128 @@ const styles = StyleSheet.create({
     emptyState: { alignItems: 'center', paddingVertical: 24 },
     emptyText: { fontSize: 16, fontWeight: '700', color: '#374151', marginTop: 8 },
     emptySubtext: { fontSize: 13, color: '#9ca3af', textAlign: 'center', marginTop: 4 },
+
+    // ── Map Toggle ──
+    mapToggleRow: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        gap: 8,
+    },
+    mapToggleBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#e9e5f5',
+    },
+    mapToggleBtnActive: {
+        backgroundColor: '#7c3aed',
+    },
+    mapToggleText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#6b7280',
+    },
+    mapToggleTextActive: {
+        color: '#fff',
+    },
+
+    // ── Map ──
+    maidMapContainer: {
+        height: 350,
+        marginHorizontal: 16,
+        marginBottom: 16,
+        borderRadius: 16,
+        overflow: 'hidden',
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+    },
+    maidMap: {
+        flex: 1,
+    },
+    custMarker: {
+        borderRadius: 16,
+        padding: 7,
+        borderWidth: 2,
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.15,
+        shadowRadius: 3,
+    },
+    custCallout: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 12,
+        minWidth: 160,
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+    },
+    custCalloutName: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#1f2937',
+        marginBottom: 2,
+    },
+    custCalloutService: {
+        fontSize: 13,
+        color: '#6b7280',
+        marginBottom: 6,
+    },
+    custCalloutBadge: {
+        alignSelf: 'flex-start',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
+        marginBottom: 4,
+    },
+    custCalloutStatus: {
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    custCalloutTime: {
+        fontSize: 12,
+        color: '#6b7280',
+        marginBottom: 6,
+    },
+    custCalloutNav: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: '#7c3aed',
+        borderRadius: 8,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        alignSelf: 'flex-start',
+        marginTop: 4,
+    },
+    custCalloutNavText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    maidMapEmpty: {
+        position: 'absolute',
+        bottom: 16,
+        left: 16,
+        right: 16,
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderRadius: 12,
+        padding: 12,
+        alignItems: 'center',
+    },
+    maidMapEmptyText: {
+        fontSize: 13,
+        color: '#6b7280',
+        fontWeight: '500',
+    },
 });
