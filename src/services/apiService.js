@@ -4,8 +4,12 @@ import { auth } from '../config/firebaseConfig';
 // 🔧  Base URL — dynamically switch based on environment
 // ============================================================
 export const API_BASE_URL = __DEV__ 
-  ? (process.env.EXPO_PUBLIC_API_BASE_URL || 'http://192.168.31.217:8080/api')
-  : (process.env.EXPO_PUBLIC_PROD_API_URL || 'https://api.serveease.com/api');
+  ? process.env.EXPO_PUBLIC_API_BASE_URL
+  : process.env.EXPO_PUBLIC_PROD_API_URL;
+
+if (!API_BASE_URL) {
+  console.warn('⚠️ API_BASE_URL is missing! Please make sure EXPO_PUBLIC_API_BASE_URL and EXPO_PUBLIC_PROD_API_URL are set in your .env file.');
+}
 
 
 /**
@@ -301,5 +305,23 @@ export const submitReview = async (bookingId, rating, comment = '') => {
     });
 };
 
-export { API_BASE_URL, getIdToken };
+/**
+ * 📱 Notifications
+ */
+export const registerDeviceToken = async (fcmToken, deviceType = 'android') => {
+    try {
+        const headers = await getAuthHeaders();
+        const response = await fetch(`${API_BASE_URL}/users/register-device`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ fcmToken, deviceType }),
+        });
+        return await handleResponse(response);
+    } catch (error) {
+        console.error('API Error (registerDeviceToken):', error);
+        throw error;
+    }
+};
+
+export { getIdToken };
 
