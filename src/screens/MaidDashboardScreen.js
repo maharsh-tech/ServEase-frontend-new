@@ -12,6 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Location from 'expo-location';
 import {
     getCurrentUser,
     getMyBookings,
@@ -20,6 +21,7 @@ import {
     rejectBookingAPI,
     updateBookingStatus,
     cancelBooking,
+    syncMaidLocation,
 } from '../services/apiService';
 import { auth } from '../config/firebaseConfig';
 
@@ -58,10 +60,11 @@ function StatCard({ icon, label, value, color }) {
     );
 }
 
-function BookingRequestCard({ booking, onAccept, onDecline, onComplete }) {
+function BookingRequestCard({ booking, onAccept, onDecline, onStartJob, onComplete }) {
     const statusStyle = STATUS_COLORS[booking.status] || STATUS_COLORS.PENDING;
     const isPending = booking.status === 'PENDING';
     const isConfirmed = booking.status === 'CONFIRMED';
+    const isInProgress = booking.status === 'IN_PROGRESS';
 
     return (
         <View style={styles.bookingItem}>
@@ -123,6 +126,16 @@ function BookingRequestCard({ booking, onAccept, onDecline, onComplete }) {
             )}
 
             {isConfirmed && (
+                <TouchableOpacity
+                    style={[styles.actionBtn, styles.startJobBtn, { marginTop: 12 }]}
+                    onPress={() => onStartJob(booking)}
+                >
+                    <Ionicons name="play" size={18} color="#fff" />
+                    <Text style={styles.startJobBtnText}>Start Job</Text>
+                </TouchableOpacity>
+            )}
+
+            {isInProgress && (
                 <TouchableOpacity
                     style={[styles.actionBtn, styles.completeBtn, { marginTop: 12 }]}
                     onPress={() => onComplete(booking)}
@@ -211,6 +224,59 @@ export default function MaidDashboardScreen({ navigation }) {
         };
     }, []);
 
+    // 📍 Maid Location Tracking — send live location to backend
+    useEffect(() => {
+        let locationSubscription = null;
+
+        const startLocationTracking = async () => {
+            try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    console.log('⚠️ Location permission not granted for maid tracking');
+                    return;
+                }
+
+                // Send initial location immediately
+                try {
+                    const loc = await Location.getCurrentPositionAsync({});
+                    await syncMaidLocation(loc.coords.latitude, loc.coords.longitude);
+                    console.log('📍 Initial maid location synced');
+                } catch (e) {
+                    console.log('Initial location sync failed:', e.message);
+                }
+
+                // Watch for continuous updates (every ~10 seconds or 50m movement)
+                locationSubscription = await Location.watchPositionAsync(
+                    {
+                        accuracy: Location.Accuracy.Balanced,
+                        timeInterval: 10000,     // 10 seconds
+                        distanceInterval: 50,    // 50 meters
+                    },
+                    async (loc) => {
+                        try {
+                            await syncMaidLocation(loc.coords.latitude, loc.coords.longitude);
+                        } catch (e) {
+                            // Silently fail — location sync is non-critical
+                            console.log('Location sync failed:', e.message);
+                        }
+                    }
+                );
+                console.log('📍 Maid location tracking started');
+            } catch (error) {
+                console.error('Failed to start location tracking:', error.message);
+            }
+        };
+
+        startLocationTracking();
+
+        return () => {
+            if (locationSubscription) {
+                locationSubscription.remove();
+                console.log('📍 Maid location tracking stopped');
+            }
+        };
+    }, []);
+
     const onRefresh = () => { setRefreshing(true); loadData(); };
 
     const handleAccept = (booking) => {
@@ -252,6 +318,29 @@ export default function MaidDashboardScreen({ navigation }) {
                         } catch (e) {
                             console.error('Decline failed:', e.message);
                             Alert.alert('Error', e.message || 'Could not decline booking.');
+                        }
+                        loadData();
+                    },
+                },
+            ]
+        );
+    };
+
+    const handleStartJob = (booking) => {
+        Alert.alert(
+            'Start Job',
+            `Start working on ${booking.serviceType} for ${booking.customerName}?`,
+            [
+                { text: 'Not Yet', style: 'cancel' },
+                {
+                    text: 'Start',
+                    onPress: async () => {
+                        try {
+                            await updateBookingStatus(booking.id, 'IN_PROGRESS');
+                            Alert.alert('Started! 🚀', 'Job is now in progress.');
+                        } catch (e) {
+                            console.error('Start job failed:', e.message);
+                            Alert.alert('Error', e.message || 'Could not start job.');
                         }
                         loadData();
                     },
@@ -354,6 +443,7 @@ export default function MaidDashboardScreen({ navigation }) {
                             booking={b}
                             onAccept={handleAccept}
                             onDecline={handleDecline}
+                            onStartJob={handleStartJob}
                             onComplete={handleComplete}
                         />
                     ))
@@ -370,6 +460,7 @@ export default function MaidDashboardScreen({ navigation }) {
                             booking={b}
                             onAccept={handleAccept}
                             onDecline={handleDecline}
+                            onStartJob={handleStartJob}
                             onComplete={handleComplete}
                         />
                     ))}
@@ -386,6 +477,7 @@ export default function MaidDashboardScreen({ navigation }) {
                             booking={b}
                             onAccept={handleAccept}
                             onDecline={handleDecline}
+                            onStartJob={handleStartJob}
                             onComplete={handleComplete}
                         />
                     ))}
@@ -458,6 +550,12 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3, shadowRadius: 4,
     },
     acceptBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+    startJobBtn: {
+        backgroundColor: '#22c55e', elevation: 2,
+        shadowColor: '#22c55e', shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3, shadowRadius: 4,
+    },
+    startJobBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
     completeBtn: {
         backgroundColor: '#3b82f6', elevation: 2,
         shadowColor: '#3b82f6', shadowOffset: { width: 0, height: 2 },

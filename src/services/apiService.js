@@ -165,6 +165,17 @@ export const updateLocation = async (latitude, longitude) => {
     });
 };
 
+/**
+ * Sync maid's live location (updates both user and maid tables).
+ * Used for continuous location tracking on the maid's device.
+ */
+export const syncMaidLocation = async (latitude, longitude) => {
+    return apiRequest('/location/sync', {
+        method: 'PUT',
+        body: JSON.stringify({ latitude, longitude }),
+    });
+};
+
 // ==================== MAIDS ====================
 
 /**

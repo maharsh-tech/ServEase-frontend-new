@@ -14,19 +14,20 @@ const AVATAR_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#22c55e', '#f59e0b', '#
  * Map backend MaidResponse to the shape MaidCard expects.
  */
 const mapMaidForUI = (maid, index, userLat, userLng) => {
-    const distance = calculateDistance(userLat, userLng, maid.latitude, maid.longitude);
+    const hasCoords = maid.latitude != null && maid.longitude != null;
+    const distance = hasCoords ? calculateDistance(userLat, userLng, maid.latitude, maid.longitude) : null;
     return {
         id: String(maid.id),
         maidId: maid.id,
         name: maid.fullName || 'Unknown',
         rating: maid.avgRating ? String(maid.avgRating) : '0.0',
         reviews: maid.totalReviews || 0,
-        distance: distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`,
+        distance: distance == null ? 'N/A' : (distance < 1 ? `${Math.round(distance * 1000)} m` : `${distance.toFixed(1)} km`),
         experience: maid.experienceYears ? `${maid.experienceYears} yrs` : 'N/A',
         hourlyRate: maid.hourlyRate ? String(maid.hourlyRate) : '0',
         color: AVATAR_COLORS[index % AVATAR_COLORS.length],
-        latitude: maid.latitude || userLat,
-        longitude: maid.longitude || userLng,
+        latitude: maid.latitude || null,
+        longitude: maid.longitude || null,
         servicesOffered: maid.servicesOffered,
         bio: maid.bio,
     };
