@@ -306,21 +306,13 @@ export const submitReview = async (bookingId, rating, comment = '') => {
 };
 
 /**
- * 📱 Notifications
+ * 📱 Notifications — register device token for push notifications
  */
 export const registerDeviceToken = async (fcmToken, deviceType = 'android') => {
-    try {
-        const headers = await getAuthHeaders();
-        const response = await fetch(`${API_BASE_URL}/users/register-device`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ fcmToken, deviceType }),
-        });
-        return await handleResponse(response);
-    } catch (error) {
-        console.error('API Error (registerDeviceToken):', error);
-        throw error;
-    }
+    return apiRequest('/users/register-device', {
+        method: 'POST',
+        body: JSON.stringify({ fcmToken, deviceType }),
+    });
 };
 
 export { getIdToken };

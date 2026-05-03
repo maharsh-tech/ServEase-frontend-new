@@ -22,13 +22,6 @@ import {
     cancelBooking,
 } from '../services/apiService';
 import { auth } from '../config/firebaseConfig';
-import {
-    getBookingsForMaid,
-    acceptBooking as acceptLocal,
-    declineBooking as declineLocal,
-    completeBooking as completeLocal,
-    subscribe,
-} from '../services/bookingStore';
 
 const STATUS_COLORS = {
     PENDING: { bg: '#fef3c7', text: '#92400e' },
@@ -161,26 +154,16 @@ export default function MaidDashboardScreen({ navigation }) {
             }
 
             // Load bookings from backend
-            let allBookings = [];
             try {
                 const bookingsRes = await getMyBookings();
-                allBookings = bookingsRes?.data || [];
+                setBookings(bookingsRes?.data || []);
             } catch (err) {
                 console.log('Backend bookings unavailable:', err.message);
+                setBookings([]);
             }
-
-            // Merge with local store bookings (for offline-created ones)
-            const localBookings = getBookingsForMaid();
-            // Only add local bookings that aren't already in backend
-            const backendIds = new Set(allBookings.map(b => b.id));
-            const uniqueLocal = localBookings.filter(b => !backendIds.has(b.id));
-            allBookings = [...uniqueLocal, ...allBookings];
-
-            setBookings(allBookings);
         } catch (err) {
             console.error('Error loading maid dashboard:', err.message);
-            // Fallback to local
-            setBookings(getBookingsForMaid());
+            setBookings([]);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -222,11 +205,7 @@ export default function MaidDashboardScreen({ navigation }) {
 
         setupRealtime();
 
-        // Listen to local store changes
-        const unsub = subscribe(() => loadData());
-        
         return () => {
-            unsub();
             if (pollInterval) clearInterval(pollInterval);
             disconnectSocket();
         };
@@ -247,9 +226,8 @@ export default function MaidDashboardScreen({ navigation }) {
                             await acceptBookingAPI(booking.id);
                             Alert.alert('Accepted ✅', 'Booking confirmed!');
                         } catch (e) {
-                            console.log('Backend accept failed, using local:', e.message);
-                            acceptLocal(booking.id);
-                            Alert.alert('Accepted ✅', 'Booking confirmed!');
+                            console.error('Accept failed:', e.message);
+                            Alert.alert('Error', e.message || 'Could not accept booking.');
                         }
                         loadData();
                     },
@@ -272,9 +250,8 @@ export default function MaidDashboardScreen({ navigation }) {
                             await rejectBookingAPI(booking.id, 'Declined by maid');
                             Alert.alert('Declined', 'Booking has been declined.');
                         } catch (e) {
-                            console.log('Backend reject failed, using local:', e.message);
-                            declineLocal(booking.id);
-                            Alert.alert('Declined', 'Booking has been declined.');
+                            console.error('Decline failed:', e.message);
+                            Alert.alert('Error', e.message || 'Could not decline booking.');
                         }
                         loadData();
                     },
@@ -296,9 +273,8 @@ export default function MaidDashboardScreen({ navigation }) {
                             await updateBookingStatus(booking.id, 'COMPLETED');
                             Alert.alert('Completed 🎉', 'Great job! Booking marked as completed.');
                         } catch (e) {
-                            console.log('Backend complete failed, using local:', e.message);
-                            completeLocal(booking.id);
-                            Alert.alert('Completed 🎉', 'Great job! Booking marked as completed.');
+                            console.error('Complete failed:', e.message);
+                            Alert.alert('Error', e.message || 'Could not update booking.');
                         }
                         loadData();
                     },
